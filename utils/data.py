@@ -14,17 +14,17 @@ def extract_hash_answer(text: str) -> str | None:
 
 
 # uncomment middle messages for 1-shot prompting
-def get_gsm8k_questions(split = "train") -> Dataset:
+def get_gsm8k_questions(split = "train[:200]") -> Dataset:
     data = load_dataset('openai/gsm8k', 'main')[split] # type: ignore
-    # system_prompt = """
-    #     Solve the following math problem step by step. The reasoning process and direct answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>: 
-    #     <think>
-    #     ...
-    #     </think>
-    #     <answer>
-    #     ...
-    #     </answer>
-    # """
+    system_prompt = """
+        Solve the following math problem step by step. The reasoning process and direct answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>: 
+        <think>
+        ...
+        </think>
+        <answer>
+        ...
+        </answer>
+    """
     # system_prompt = """
     #     Solve the following math problem step by step. The reasoning process is enclosed within <think> </think> tags, and the final answer is provided after "####", i.e.,: 
     #     <think>
@@ -32,17 +32,17 @@ def get_gsm8k_questions(split = "train") -> Dataset:
     #     </think>
     #     #### answer
     # """
-    instruction = """
-        Let\'s think step by step first within <think> </think> tags, and output the final answer after "####" tag, i.e.,: 
-        #     <think>
-        #     ...
-        #     </think>
-        #     #### number
-    """
+    # instruction = """
+    #     Let\'s think step by step first within <think> </think> tags, and output the final answer after "####" tag, i.e.,: 
+    #     #     <think>
+    #     #     ...
+    #     #     </think>
+    #     #     #### number
+    # """
     data = data.map(lambda x: { # type: ignore
         'prompt': [
-            # {'role': 'system', 'content': system_prompt},
-            {'role': 'user', 'content': x['question']  + " " + instruction}
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': x['question']}
         ],
         'answer': extract_hash_answer(x['answer'])
     }) # type: ignore
