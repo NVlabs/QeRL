@@ -54,7 +54,7 @@ def gsm8k_score(prompts, completions, answer, **kwargs):
     q = prompts[0][-1]['content']
     rewards = []
     for r, a in zip(responses, answer):
-        solution = extract_solution(solution_str=r, method=method)
+        solution = extract_xml_answer(solution_str=r, method=method)
         if solution is None:
             rewards.append(format_score)
         else:
