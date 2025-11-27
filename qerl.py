@@ -41,8 +41,8 @@ def get_dataset(data):
     if data == "gsm8k":
         dataset = get_gsm8k_questions(split="train")
         reward_funcs = [
-            gsm8k_score,
-            think_reward_func
+            soft_format_reward_func,
+            correctness_reward_func,
         ]
     elif data == "bigmath" or data == "bigmath_hard":
         dataset = get_bigmath_questions(data, split="train")
