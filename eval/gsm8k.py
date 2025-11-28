@@ -10,6 +10,7 @@ from transformers import (
 )
 
 from vllm import LLM, SamplingParams
+from vllm.lora.request import LoRARequest
 from datasets import load_dataset, Dataset
 
 from peft import PeftModel, PeftConfig
@@ -186,7 +187,7 @@ def load_nvfp4(model_name_or_path):
     
     return llm, tokenizer
 
-def generate(llm, tokenizer, input_text, generate_kwargs):
+def generate(llm, tokenizer, input_text, generate_kwargs, args):
     text = tokenizer.apply_chat_template(
         input_text,
         tokenize=False,
@@ -195,8 +196,83 @@ def generate(llm, tokenizer, input_text, generate_kwargs):
 
     # max_tokens is for the maximum length for generation.
     sampling_params = SamplingParams(temperature=0.6, top_p=0.95, max_tokens=1024)
-    outputs = llm.generate(text, sampling_params,use_tqdm=False)
+    
+    # Check if there are LoRA adapters loaded in vLLM
+    if args.load == "nvfp4":
+        lora_requests = None
+        try:
+            # Check if LoRA is enabled by trying to access lora_manager
+            model_runner = llm.llm_engine.model_executor.driver_worker.model_runner
+            if hasattr(model_runner, 'lora_manager') and model_runner.lora_manager is not None:
+                lora_int_ids = list(llm.llm_engine.list_loras())
+                if len(lora_int_ids) > 0:
+                    # Use the first LoRA adapter
+                    lora_int_id = lora_int_ids[0]
+                    lora_requests = LoRARequest(
+                        lora_name=f"{lora_int_id}",
+                        lora_int_id=lora_int_id,
+                        lora_path="lora_stub_path"
+                    )
+        except (AttributeError, Exception):
+            # LoRA is not enabled, continue without LoRA
+            pass
+        
+        # Generate with or without LoRA
+        outputs = llm.generate(text, sampling_params, lora_request=lora_requests, use_tqdm=False)
+    else:
+        outputs = llm.generate(text, sampling_params, use_tqdm=False)
     return outputs[0].outputs[0].text
+
+def generate_batch(llm, tokenizer, input_texts, generate_kwargs, args):
+    """Batch generate for multiple prompts"""
+    texts = []
+    for input_text in input_texts:
+        text = tokenizer.apply_chat_template(
+            input_text,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        texts.append(text)
+    
+    # max_tokens is for the maximum length for generation.
+    if "checkpoint" in args.model or "ckpt" in args.model:
+        max_tokens = generate_kwargs.get("max_new_tokens", 4096)
+    else:
+        max_tokens = generate_kwargs.get("max_new_tokens", 2048)
+    
+    sampling_params = SamplingParams(
+        temperature=generate_kwargs.get("temperature", 0.8),
+        top_p=generate_kwargs.get("top_p", 0.95),
+        max_tokens=max_tokens
+    )
+    
+    # Check if there are LoRA adapters loaded in vLLM
+    if args.load == "nvfp4":
+        lora_requests = None
+        try:
+            # Check if LoRA is enabled by trying to access lora_manager
+            model_runner = llm.llm_engine.model_executor.driver_worker.model_runner
+            if hasattr(model_runner, 'lora_manager') and model_runner.lora_manager is not None:
+                lora_int_ids = list(llm.llm_engine.list_loras())
+                if len(lora_int_ids) > 0:
+                    # Use the first LoRA adapter
+                    lora_int_id = lora_int_ids[0]
+                    lora_requests = LoRARequest(
+                        lora_name=f"{lora_int_id}",
+                        lora_int_id=lora_int_id,
+                        lora_path="lora_stub_path"
+                    )
+        except (AttributeError, Exception):
+            # LoRA is not enabled, continue without LoRA
+            pass
+        
+        # Generate with or without LoRA
+        outputs = llm.generate(texts, sampling_params, lora_request=lora_requests, use_tqdm=True)
+    else:
+        outputs = llm.generate(texts, sampling_params, use_tqdm=True)
+    
+    # Extract texts from outputs
+    return [output.outputs[0].text for output in outputs]
 
 def extract_xml_answer(text: str) -> str:
     answer = text.split("<answer>")[-1]
@@ -207,7 +283,7 @@ def correctness_reward_func(prompts, response, answer, **kwargs) -> list[float]:
     q = prompts
     extracted_responses = extract_xml_answer(response)
     print('-'*20, f"Question:\n{q}", f"\nAnswer:\n{answer}", f"\nResponse:\n{response}", f"\nExtracted:\n{extracted_responses}")
-    return [1.0 if r == a else 0.0 for r, a in zip(extracted_responses, answer)]
+    return [1.0 if r == a else 0.0 for r, a in zip(extracted_responses, answer)] or [0.0]
 
 def accuracy_reward(prompts, completions, answer):
     """Reward function that checks if the completion is the same as the ground truth."""
@@ -303,30 +379,42 @@ def main():
     else:
         llm, tokenizer = load(args.model)
 
-    answers = []
-    for sample in tqdm(data):
-        input_text = sample["prompt"]
-        prompt = input_text[1]['content']
-        if "checkpoint" in args.model or "ckpt" in args.model:
-            generate_kwargs = dict(max_new_tokens=4096, top_p=0.95, temperature=0.8)
+    # Prepare all prompts and answers for batch processing
+    input_texts = []
+    prompts = []
+    gold_answers = []
+    
+    for sample in data:
+        input_texts.append(sample["prompt"])
+        if len(sample["prompt"]) > 1:
+            prompts.append(sample["prompt"][1]['content'])
         else:
-            generate_kwargs = dict(max_new_tokens=2048, top_p=0.95, temperature=0.8)
-        response = generate(llm, tokenizer, input_text, generate_kwargs)
-
-        gold_answer = sample["answer"]
-
+            prompts.append(sample["prompt"][0]['content'])
+        gold_answers.append(sample["answer"])
+    
+    # Prepare generate_kwargs
+    if "checkpoint" in args.model or "ckpt" in args.model:
+        generate_kwargs = dict(max_new_tokens=4096, top_p=0.95, temperature=0.8)
+    else:
+        generate_kwargs = dict(max_new_tokens=2048, top_p=0.95, temperature=0.8)
+    
+    # Batch generate all responses
+    print(f"Generating responses for {len(input_texts)} samples in batch...")
+    responses = generate_batch(llm, tokenizer, input_texts, generate_kwargs, args)
+    
+    # Process all results
+    answers = []
+    for prompt, response, gold_answer in tqdm(zip(prompts, responses, gold_answers), total=len(prompts), desc="Evaluating"):
         if args.data == "gsm8k":
             answers.append(correctness_reward_func(prompt, response, gold_answer)[0])
         else:
             answers.append(math_verified(prompt, response, gold_answer)[0])
-
-
-
-        print(
-            f"Num of total question: {len(answers)}, "
-            f"Correct num: {sum(answers)}, "
-            f"Accuracy: {float(sum(answers))/len(answers)}."
-        )
+    
+    print(
+        f"Num of total question: {len(answers)}, "
+        f"Correct num: {sum(answers)}, "
+        f"Accuracy: {float(sum(answers))/len(answers)}."
+    )
 
     os.makedirs(args.output_dir, exist_ok=True)
 
