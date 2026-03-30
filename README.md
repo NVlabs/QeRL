@@ -195,12 +195,10 @@ lighteval vllm $MODEL_ARGS "lighteval|$TASK|0|0" \
 Please consider to cite our paper and this framework, if they are helpful in your research.
 ```bibtex
 @article{huang2025qerl,
-      title={QeRL: Beyond Efficiency -- Quantization-enhanced Reinforcement Learning for LLMs}, 
-      author={Wei Huang and Yi Ge and Shuai Yang and Yicheng Xiao and Huizi Mao and Yujun Lin and Hanrong Ye and Sifei Liu and Ka Chun Cheung and Hongxu Yin and Yao Lu and Xiaojuan Qi and Song Han and Yukang Chen}
-      year={2025},
-      eprint={2510.11696},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+  title={QeRL: Beyond Efficiency--Quantization-enhanced Reinforcement Learning for LLMs},
+  author={Huang, Wei and Ge, Yi and Yang, Shuai and Xiao, Yicheng and Mao, Huizi and Lin, Yujun and Ye, Hanrong and Liu, Sifei and Cheung, Ka Chun and Yin, Hongxu and others},
+  journal={arXiv preprint arXiv:2510.11696},
+  year={2025}
 }
 ```
 
